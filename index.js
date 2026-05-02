@@ -10,6 +10,7 @@ const {
 } = require('discord.js');
 
 const GOBLIN_CHANNEL_ID = '1500025967588937831';
+const PHOTO_CHANNEL_ID = '1500042301123072172';
 const DATA_FILE = './goblin-data.json';
 const TIMEZONE = 'America/Los_Angeles';
 
@@ -29,6 +30,109 @@ const SELECTABLE_ROLES = [
   '🐢 Slow & Steady'
 ];
 
+const PHOTO_PROMPTS = [
+  "Your shoes before today’s walk",
+  "Your shoes after your walk",
+  "Your shadow while walking",
+  "A photo mid-step",
+  "Your walking path",
+  "Your favorite walking shoes",
+  "Your least favorite walking shoes",
+  "A starting point photo",
+  "An end of walk photo",
+  "Your steps tracker or watch",
+  "A plant you saw",
+  "A tree that caught your eye",
+  "Something green",
+  "Something growing through concrete",
+  "A flower",
+  "A leaf close-up",
+  "A bug you saw",
+  "A bird if you can catch one",
+  "A patch of grass",
+  "Something natural and something manmade together",
+  "The sky during your walk",
+  "A cloudy sky",
+  "A sunny moment",
+  "Rain if it happens",
+  "A puddle reflection",
+  "Sunrise walk",
+  "Sunset walk",
+  "Shadows from sunlight",
+  "Windy day evidence",
+  "The weather where you are right now",
+  "A street you walked on",
+  "A cool building",
+  "Something colorful",
+  "Something old",
+  "Something new",
+  "A sidewalk crack pattern",
+  "A random sign",
+  "A parked car you liked",
+  "A place you’ve never noticed before",
+  "A hidden detail",
+  "Something shaped like a face",
+  "Something that looks weird",
+  "Something tiny",
+  "Something big",
+  "Something oddly satisfying",
+  "Something symmetrical",
+  "Something messy",
+  "Something aesthetic",
+  "A reflection in a mirror or window",
+  "A shadow that looks cool",
+  "Your walking outfit",
+  "A selfie mid-walk",
+  "Your tired face",
+  "Your I finished my steps face",
+  "Your water bottle",
+  "Your walking playlist screenshot",
+  "Your favorite walking spot",
+  "Where you stopped to rest",
+  "A victory pose",
+  "Your walking vibe today",
+  "A dog you saw",
+  "A cat if you’re lucky",
+  "Something abandoned",
+  "Something broken",
+  "Something shiny",
+  "Something rusty",
+  "Something unexpected",
+  "Something funny",
+  "Something that made you stop walking",
+  "Something you almost missed",
+  "Something the goblin would approve of",
+  "Something the goblin would hate",
+  "A sacred shoe offering photo",
+  "A cursed object",
+  "Something chaotic",
+  "Something that looks magical",
+  "A goblin hiding spot",
+  "A mysterious path",
+  "A place the goblin would lurk",
+  "A tribute to the goblin",
+  "Find something red",
+  "Find something blue",
+  "Find something circular",
+  "Find something with numbers",
+  "Find something with letters",
+  "Find something repeating",
+  "Find something cracked",
+  "Find something reflective",
+  "Find something moving",
+  "Find something unusual",
+  "Your walk was worth it photo",
+  "The best photo you took today",
+  "The worst photo you took today",
+  "A blurry photo on purpose",
+  "A zoomed-in weird detail",
+  "A before vs after walk photo",
+  "A photo that tells a story",
+  "Something that represents your mood",
+  "Something peaceful",
+  "Something chaotic to end the day"
+];
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -45,6 +149,11 @@ let challenge = {
   finalAnnounced: false,
   lastShoeHolderId: null,
   lastShoeHolderName: null
+};
+
+let photoChallenge = {
+  usedPrompts: [],
+  lastPromptDate: null
 };
 
 let pendingChallenge = null;
@@ -85,7 +194,10 @@ const goblinMoods = [
 ];
 
 function saveData() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ challenge, stepData, participants }, null, 2));
+  fs.writeFileSync(
+    DATA_FILE,
+    JSON.stringify({ challenge, stepData, participants, photoChallenge }, null, 2)
+  );
 }
 
 function loadData() {
@@ -94,6 +206,7 @@ function loadData() {
     challenge = { ...challenge, ...(data.challenge || {}) };
     stepData = data.stepData || {};
     participants = data.participants || {};
+    photoChallenge = { ...photoChallenge, ...(data.photoChallenge || {}) };
   }
 }
 
@@ -298,9 +411,7 @@ async function updateSacredShoeRole(guild, winnerId) {
   }
 
   const winner = await guild.members.fetch(winnerId).catch(() => null);
-  if (winner) {
-    await winner.roles.add(role).catch(() => {});
-  }
+  if (winner) await winner.roles.add(role).catch(() => {});
 }
 
 async function moveOldVictorToFormerChampion(guild) {
@@ -324,9 +435,7 @@ async function assignTrialVictor(guild, winnerId) {
   }
 
   const winner = await guild.members.fetch(winnerId).catch(() => null);
-  if (winner) {
-    await winner.roles.add(victorRole).catch(() => {});
-  }
+  if (winner) await winner.roles.add(victorRole).catch(() => {});
 }
 
 function makePrizePairings(overall) {
@@ -383,6 +492,39 @@ function makeShoeCeremony(winner) {
     `The goblin pries the Sacred Shoe from ${challenge.lastShoeHolderName}'s hands and dramatically bestows it upon ${winner.username}.\n\n` +
     `${winner.username} has claimed the shoe with **${winner.steps}** steps.\n\n` +
     `"Walk boldly, new holder. The goblin is watching."`
+  );
+}
+
+async function postPhotoChallenge() {
+  if (!challenge.active) return;
+
+  const today = getDateKey();
+  if (photoChallenge.lastPromptDate === today) return;
+
+  const channel = client.channels.cache.get(PHOTO_CHANNEL_ID);
+  if (!channel) return;
+
+  let availablePrompts = PHOTO_PROMPTS.filter(
+    prompt => !photoChallenge.usedPrompts.includes(prompt)
+  );
+
+  if (availablePrompts.length === 0) {
+    photoChallenge.usedPrompts = [];
+    availablePrompts = PHOTO_PROMPTS;
+  }
+
+  const prompt = availablePrompts[Math.floor(Math.random() * availablePrompts.length)];
+
+  photoChallenge.usedPrompts.push(prompt);
+  photoChallenge.lastPromptDate = today;
+  saveData();
+
+  await channel.send(
+    `@everyone\n\n` +
+    `📸 **Daily Goblin Photo Challenge**\n\n` +
+    `The goblin demands visual proof of your journey.\n\n` +
+    `**Today's Prompt:** ${prompt}\n\n` +
+    `Bring forth your photo offering in this channel. The goblin will inspect it with great suspicion.`
   );
 }
 
@@ -614,8 +756,12 @@ client.once('ready', () => {
   loadData();
   console.log(`Goblin is awake as ${client.user.tag}`);
 
-  cron.schedule('0 8 * * *', () => {
-    postDailyAnnouncement();
+  cron.schedule('0 8 * * *', async () => {
+    await postDailyAnnouncement();
+  }, { timezone: TIMEZONE });
+
+  cron.schedule('5 8 * * *', async () => {
+    await postPhotoChallenge();
   }, { timezone: TIMEZONE });
 });
 
@@ -698,6 +844,10 @@ client.on('messageCreate', async (message) => {
     challenge.finalAnnounced = false;
     challenge.lastShoeHolderId = null;
     challenge.lastShoeHolderName = null;
+
+    photoChallenge.usedPrompts = [];
+    photoChallenge.lastPromptDate = null;
+
     stepData = {};
     saveData();
 
@@ -709,6 +859,7 @@ client.on('messageCreate', async (message) => {
         `👹 **THE GOBLIN'S STEP TRIAL HAS BEEN DECLARED** 👹\n\n` +
         `A new trial shall run from **${formatDate(challenge.startDate)}** to **${formatDate(challenge.endDate)}**.\n\n` +
         `Each morning at **8:00 AM**, the goblin will announce the previous day's standings and the current challenge ranks.\n\n` +
+        `Each morning at **8:05 AM**, the goblin will post a daily photo challenge in <#${PHOTO_CHANNEL_ID}>.\n\n` +
         `Each day, the top walker shall be crowned:\n` +
         `**👹 Holder of the Sacred Shoe**\n\n` +
         `At the end, one will rise above all:\n` +
@@ -826,6 +977,17 @@ client.on('messageCreate', async (message) => {
 
     await postDailyAnnouncement();
     message.reply("The goblin performs a test morning judgment.");
+    return;
+  }
+
+  if (command === '!testphoto') {
+    if (!isAdmin(message)) {
+      message.reply("The goblin blocks the camera. Only my loyal servant may test the photo challenge.");
+      return;
+    }
+
+    await postPhotoChallenge();
+    message.reply("The goblin performs a test photo challenge.");
     return;
   }
 });
