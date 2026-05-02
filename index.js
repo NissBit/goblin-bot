@@ -25,6 +25,64 @@ let challenge = {
 let pendingChallenge = null;
 let stepData = {};
 
+const goblinMoods = [
+  {
+    name: "Grouchy",
+    line: "The goblin woke up grouchy and demands extra steps from all mortals today.",
+    stepPraise: "The goblin grunts. Fine. These steps are acceptable, but do not expect applause.",
+    lowSteps: "The goblin squints. These are not steps. These are crumbs.",
+    randoms: [
+      "The goblin is grouchy today. Walk more.",
+      "The goblin demands movement. Immediately.",
+      "Someone here is disappointing the sacred shoe."
+    ]
+  },
+  {
+    name: "Chaotic",
+    line: "The goblin woke up chaotic and may reward effort or mock it. No promises.",
+    stepPraise: "The goblin spins in a tiny circle and records your steps with suspicious joy.",
+    lowSteps: "The goblin laughs so hard he drops the scroll. Tiny steps. Tiny drama.",
+    randoms: [
+      "The goblin has rearranged the shoelaces. Do not ask why.",
+      "A mortal somewhere is walking. The goblin approves aggressively.",
+      "The goblin smells ambition. Or snacks."
+    ]
+  },
+  {
+    name: "Judgmental",
+    line: "The goblin woke up judgmental. All excuses will be inspected and rejected.",
+    stepPraise: "The goblin records your offering. You may continue existing.",
+    lowSteps: "The goblin has seen ants travel farther.",
+    randoms: [
+      "The goblin is judging your step count from afar.",
+      "Excuses have been banned by goblin decree.",
+      "Walk now. Explain later."
+    ]
+  },
+  {
+    name: "Dramatic",
+    line: "The goblin woke up dramatic and believes every step is part of an epic saga.",
+    stepPraise: "The goblin raises the scroll to the sky. A worthy chapter has been written.",
+    lowSteps: "The goblin collapses dramatically. Such few steps. Such tragedy.",
+    randoms: [
+      "The goblin gazes into the distance. The trial continues.",
+      "Every step echoes through history. Probably.",
+      "The sacred shoe awaits a champion."
+    ]
+  },
+  {
+    name: "Suspiciously Encouraging",
+    line: "The goblin woke up encouraging, which is suspicious but useful.",
+    stepPraise: "The goblin nods. Strong effort, mortal. Do not make this weird.",
+    lowSteps: "The goblin believes you can do better. Unfortunately, he is right.",
+    randoms: [
+      "The goblin believes in you today. This is alarming.",
+      "Tiny progress is still progress, mortal.",
+      "The goblin says hydrate and walk. Begrudgingly."
+    ]
+  }
+];
+
 function saveData() {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ challenge, stepData }, null, 2));
 }
@@ -41,15 +99,6 @@ function isAdmin(message) {
   return message.member.permissions.has(PermissionsBitField.Flags.Administrator);
 }
 
-function formatDate(date) {
-  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    timeZone: TIMEZONE
-  });
-}
-
 function getDateKey(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: TIMEZONE,
@@ -63,6 +112,26 @@ function getYesterdayKey() {
   const date = new Date();
   date.setDate(date.getDate() - 1);
   return getDateKey(date);
+}
+
+function formatDate(date) {
+  return new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: TIMEZONE
+  });
+}
+
+function getTodayMood() {
+  const today = getDateKey();
+  let total = 0;
+
+  for (const char of today) {
+    total += char.charCodeAt(0);
+  }
+
+  return goblinMoods[total % goblinMoods.length];
 }
 
 function getDailyRankings(dateKey) {
@@ -95,14 +164,17 @@ async function postDailyAnnouncement() {
   const channel = client.channels.cache.get(GOBLIN_CHANNEL_ID);
   if (!channel) return;
 
+  const mood = getTodayMood();
   const yesterday = getYesterdayKey();
   const rankings = getDailyRankings(yesterday);
 
   if (rankings.length === 0) {
     await channel.send(
       `@everyone\n\n` +
-      `The goblin awakens and checks yesterday's scroll...\n\n` +
-      `No steps were submitted for **${formatDate(yesterday)}**.\n\n` +
+      `👹 **Morning Goblin Judgment**\n\n` +
+      `${mood.line}\n\n` +
+      `The goblin checked yesterday's scroll for **${formatDate(yesterday)}**...\n\n` +
+      `No steps were submitted.\n\n` +
       `The goblin is disappointed. Deeply. Dramatically.`
     );
   } else {
@@ -111,6 +183,7 @@ async function postDailyAnnouncement() {
     let message =
       `@everyone\n\n` +
       `👹 **Morning Goblin Judgment**\n\n` +
+      `${mood.line}\n\n` +
       `The goblin has reviewed the steps from **${formatDate(yesterday)}**.\n\n` +
       `Today's **👹 Holder of the Sacred Shoe** is **${winner.username}** with **${winner.steps}** steps.\n\n` +
       `**Yesterday's Standings:**\n`;
@@ -152,6 +225,72 @@ async function postDailyAnnouncement() {
   }
 }
 
+function handleGoblinConversation(message, lower) {
+  if (message.content.startsWith('!')) return false;
+
+  if (lower.includes('who are you') || lower.includes('what are you')) {
+    message.reply("I am the Accountability Goblin, keeper of steps, judge of mortals, and owner of the sacred shoe. I do not explain myself twice.");
+    return true;
+  }
+
+  if (lower.includes('hi goblin') || lower.includes('hello goblin') || lower.includes('hey goblin')) {
+    message.reply("The goblin peers from behind the scroll... greetings, mortal. Have you walked, or merely appeared?");
+    return true;
+  }
+
+  if (lower.includes('good morning goblin')) {
+    message.reply(`The goblin awakens. ${getTodayMood().line}`);
+    return true;
+  }
+
+  if (lower.includes('i am tired') || lower.includes("i'm tired") || lower.includes('im tired')) {
+    message.reply("Tired? The goblin respects this. The goblin also ignores it. Walk anyway.");
+    return true;
+  }
+
+  if (lower.includes('i walked') || lower.includes('i got steps')) {
+    message.reply("The goblin hears claims of walking. Submit the sacred number with `!steps` or be suspected of exaggeration.");
+    return true;
+  }
+
+  if (lower.includes('excuse')) {
+    message.reply("The goblin places your excuse into the tiny excuse furnace. It is gone now.");
+    return true;
+  }
+
+  if (lower.includes('sacred shoe')) {
+    message.reply("The sacred shoe is not merely a shoe. It is power. It is glory. It probably smells terrible.");
+    return true;
+  }
+
+  if (lower.includes('trial victor')) {
+    message.reply("The Trial Victor shall be crowned only after the goblin counts every step and rejects every dramatic excuse.");
+    return true;
+  }
+
+  if (lower.includes('goblin')) {
+    const replies = [
+      "The goblin heard his name and has chosen to appear dramatically.",
+      "You summoned the goblin. This may have consequences.",
+      "The goblin is listening. He is always listening.",
+      "Speak carefully, mortal. The goblin has a spreadsheet and no mercy.",
+      "The goblin emerges from the step cave. What is it?"
+    ];
+
+    message.reply(replies[Math.floor(Math.random() * replies.length)]);
+    return true;
+  }
+
+  if (Math.random() < 0.03) {
+    const mood = getTodayMood();
+    const random = mood.randoms[Math.floor(Math.random() * mood.randoms.length)];
+    message.channel.send(random);
+    return true;
+  }
+
+  return false;
+}
+
 client.once('ready', () => {
   loadData();
   console.log(`Goblin is awake as ${client.user.tag}`);
@@ -168,6 +307,18 @@ client.on('messageCreate', (message) => {
 
   const args = message.content.trim().split(' ');
   const command = args[0].toLowerCase();
+  const lower = message.content.toLowerCase();
+
+  if (handleGoblinConversation(message, lower)) return;
+
+  if (command === '!goblin' || command === '!whoareyou') {
+    message.reply("I am the Accountability Goblin, keeper of steps, judge of mortals, and loyal commander of the sacred shoe.");
+  }
+
+  if (command === '!mood') {
+    const mood = getTodayMood();
+    message.reply(`Today's goblin mood is **${mood.name}**.\n\n${mood.line}`);
+  }
 
   if (command === '!startchallenge') {
     if (!isAdmin(message)) {
@@ -287,6 +438,7 @@ client.on('messageCreate', (message) => {
     const userId = message.author.id;
     const username = message.author.username;
     const date = getDateKey();
+    const mood = getTodayMood();
 
     if (!stepData[userId]) {
       stepData[userId] = { username, total: 0, entries: [] };
@@ -298,11 +450,11 @@ client.on('messageCreate', (message) => {
 
     saveData();
 
-    message.reply(
-      steps < 1000
-        ? `The goblin records ${steps}... tiny effort.`
-        : `The goblin records ${steps}. Acceptable.`
-    );
+    if (steps < 1000) {
+      message.reply(`${mood.lowSteps} The goblin records **${steps}** steps anyway.`);
+    } else {
+      message.reply(`${mood.stepPraise} Recorded: **${steps}** steps.`);
+    }
   }
 
   if (command === '!undo') {
@@ -318,7 +470,7 @@ client.on('messageCreate', (message) => {
 
     saveData();
 
-    message.reply(`The goblin erases ${last.steps} steps.`);
+    message.reply(`The goblin erases **${last.steps}** steps. Suspicious, but permitted.`);
   }
 
   if (command === '!leaderboard') {
