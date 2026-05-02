@@ -1,15 +1,38 @@
 require('dotenv').config();
 const fs = require('fs');
 const cron = require('node-cron');
-const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  PermissionsBitField,
+  ChannelType,
+  PermissionFlagsBits
+} = require('discord.js');
 
 const GOBLIN_CHANNEL_ID = '1500025967588937831';
 const DATA_FILE = './goblin-data.json';
 const TIMEZONE = 'America/Los_Angeles';
 
+const CATEGORY_NAME = '👟 Step Tribute Hall';
+
+const TRIAL_VICTOR_ROLE = '👑 Trial Victor';
+const FORMER_CHAMPION_ROLE = '🏆 Former Step Champion';
+const SACRED_SHOE_ROLE = '👹 Holder of the Sacred Shoe';
+
+const SELECTABLE_ROLES = [
+  '👟 Mileage Monster',
+  '💨 Step Assassin',
+  '🏃 Pro Athlete',
+  '🔥 Pavement Pusher',
+  '🐇 Step Sprinter',
+  '🚶 Casual Cruiser',
+  '🐢 Slow & Steady'
+];
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
   ]
@@ -19,80 +42,63 @@ let challenge = {
   active: false,
   startDate: null,
   endDate: null,
-  finalAnnounced: false
+  finalAnnounced: false,
+  lastShoeHolderId: null,
+  lastShoeHolderName: null
 };
 
 let pendingChallenge = null;
 let stepData = {};
+let participants = {};
 
 const goblinMoods = [
   {
     name: "Grouchy",
     line: "The goblin woke up grouchy and demands extra steps from all mortals today.",
     stepPraise: "The goblin grunts. Fine. These steps are acceptable, but do not expect applause.",
-    lowSteps: "The goblin squints. These are not steps. These are crumbs.",
-    randoms: [
-      "The goblin is grouchy today. Walk more.",
-      "The goblin demands movement. Immediately.",
-      "Someone here is disappointing the sacred shoe."
-    ]
+    lowSteps: "The goblin squints. These are not steps. These are crumbs."
   },
   {
     name: "Chaotic",
     line: "The goblin woke up chaotic and may reward effort or mock it. No promises.",
     stepPraise: "The goblin spins in a tiny circle and records your steps with suspicious joy.",
-    lowSteps: "The goblin laughs so hard he drops the scroll. Tiny steps. Tiny drama.",
-    randoms: [
-      "The goblin has rearranged the shoelaces. Do not ask why.",
-      "A mortal somewhere is walking. The goblin approves aggressively.",
-      "The goblin smells ambition. Or snacks."
-    ]
+    lowSteps: "The goblin laughs so hard he drops the scroll. Tiny steps. Tiny drama."
   },
   {
     name: "Judgmental",
     line: "The goblin woke up judgmental. All excuses will be inspected and rejected.",
     stepPraise: "The goblin records your offering. You may continue existing.",
-    lowSteps: "The goblin has seen ants travel farther.",
-    randoms: [
-      "The goblin is judging your step count from afar.",
-      "Excuses have been banned by goblin decree.",
-      "Walk now. Explain later."
-    ]
+    lowSteps: "The goblin has seen ants travel farther."
   },
   {
     name: "Dramatic",
     line: "The goblin woke up dramatic and believes every step is part of an epic saga.",
     stepPraise: "The goblin raises the scroll to the sky. A worthy chapter has been written.",
-    lowSteps: "The goblin collapses dramatically. Such few steps. Such tragedy.",
-    randoms: [
-      "The goblin gazes into the distance. The trial continues.",
-      "Every step echoes through history. Probably.",
-      "The sacred shoe awaits a champion."
-    ]
+    lowSteps: "The goblin collapses dramatically. Such few steps. Such tragedy."
   },
   {
     name: "Suspiciously Encouraging",
     line: "The goblin woke up encouraging, which is suspicious but useful.",
     stepPraise: "The goblin nods. Strong effort, mortal. Do not make this weird.",
-    lowSteps: "The goblin believes you can do better. Unfortunately, he is right.",
-    randoms: [
-      "The goblin believes in you today. This is alarming.",
-      "Tiny progress is still progress, mortal.",
-      "The goblin says hydrate and walk. Begrudgingly."
-    ]
+    lowSteps: "The goblin believes you can do better. Unfortunately, he is right."
   }
 ];
 
 function saveData() {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ challenge, stepData }, null, 2));
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ challenge, stepData, participants }, null, 2));
 }
 
 function loadData() {
   if (fs.existsSync(DATA_FILE)) {
     const data = JSON.parse(fs.readFileSync(DATA_FILE));
-    challenge = data.challenge || challenge;
+    challenge = { ...challenge, ...(data.challenge || {}) };
     stepData = data.stepData || {};
+    participants = data.participants || {};
   }
+}
+
+function findRole(guild, roleName) {
+  return guild.roles.cache.find(role => role.name === roleName);
 }
 
 function isAdmin(message) {
@@ -126,12 +132,17 @@ function formatDate(date) {
 function getTodayMood() {
   const today = getDateKey();
   let total = 0;
-
-  for (const char of today) {
-    total += char.charCodeAt(0);
-  }
-
+  for (const char of today) total += char.charCodeAt(0);
   return goblinMoods[total % goblinMoods.length];
+}
+
+function cleanChannelName(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'mortal';
 }
 
 function getDailyRankings(dateKey) {
@@ -142,20 +153,237 @@ function getDailyRankings(dateKey) {
       .filter(entry => entry.date === dateKey)
       .reduce((sum, entry) => sum + entry.steps, 0);
 
-    if (dailyTotal > 0) {
-      rankings.push({
-        userId,
-        username: user.username,
-        steps: dailyTotal
-      });
-    }
+    if (dailyTotal > 0) rankings.push({ userId, username: user.username, steps: dailyTotal });
   }
 
   return rankings.sort((a, b) => b.steps - a.steps);
 }
 
 function getOverallRankings() {
-  return Object.values(stepData).sort((a, b) => b.total - a.total);
+  return Object.entries(stepData)
+    .map(([userId, user]) => ({ userId, ...user }))
+    .sort((a, b) => b.total - a.total);
+}
+
+function roleSelectionText() {
+  return SELECTABLE_ROLES.map((role, index) => `${index + 1}. ${role}`).join('\n');
+}
+
+async function getStepCategory(guild) {
+  return guild.channels.cache.find(
+    ch => ch.type === ChannelType.GuildCategory && ch.name === CATEGORY_NAME
+  );
+}
+
+async function createParticipantChannel(member) {
+  const guild = member.guild;
+  const category = await getStepCategory(guild);
+
+  if (!category) {
+    console.log(`Missing category: ${CATEGORY_NAME}`);
+    return;
+  }
+
+  const channelName = cleanChannelName(member.user.username);
+  let channel = guild.channels.cache.find(ch => ch.name === channelName && ch.parentId === category.id);
+
+  if (!channel) {
+    channel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      parent: category.id,
+      permissionOverwrites: [
+        {
+          id: guild.roles.everyone.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.AddReactions
+          ],
+          deny: [PermissionFlagsBits.SendMessages]
+        },
+        {
+          id: member.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.AddReactions
+          ]
+        },
+        {
+          id: client.user.id,
+          allow: [
+            PermissionFlagsBits.ViewChannel,
+            PermissionFlagsBits.SendMessages,
+            PermissionFlagsBits.ReadMessageHistory,
+            PermissionFlagsBits.ManageChannels,
+            PermissionFlagsBits.AddReactions
+          ]
+        }
+      ]
+    });
+  }
+
+  participants[member.id] = {
+    username: member.user.username,
+    channelId: channel.id,
+    selectedRoles: participants[member.id]?.selectedRoles || []
+  };
+  saveData();
+
+  await channel.send(
+    `👹 The goblin has noticed a new mortal.\n\n` +
+    `Welcome, ${member}. Your personal step chamber has been forged.\n\n` +
+    `Choose your walking identities by typing:\n` +
+    `\`!roles 1 3 5\`\n\n` +
+    `You may choose one or multiple roles:\n\n` +
+    `${roleSelectionText()}\n\n` +
+    `The sacred challenge roles cannot be chosen. They must be earned.`
+  );
+}
+
+async function assignSelectableRoles(message, numbers) {
+  const member = message.member;
+  const guild = message.guild;
+
+  const selectedIndexes = [...new Set(numbers)]
+    .map(n => parseInt(n, 10))
+    .filter(n => n >= 1 && n <= SELECTABLE_ROLES.length);
+
+  if (selectedIndexes.length === 0) {
+    message.reply(
+      `The goblin squints at your choices. Use numbers like \`!roles 1 3 5\`.\n\n${roleSelectionText()}`
+    );
+    return;
+  }
+
+  const selectedRoleNames = selectedIndexes.map(index => SELECTABLE_ROLES[index - 1]);
+
+  for (const roleName of SELECTABLE_ROLES) {
+    const role = findRole(guild, roleName);
+    if (role && member.roles.cache.has(role.id)) {
+      await member.roles.remove(role).catch(() => {});
+    }
+  }
+
+  for (const roleName of selectedRoleNames) {
+    const role = findRole(guild, roleName);
+    if (role) {
+      await member.roles.add(role).catch(() => {});
+    }
+  }
+
+  participants[member.id] = {
+    username: member.user.username,
+    channelId: participants[member.id]?.channelId || message.channel.id,
+    selectedRoles: selectedRoleNames
+  };
+
+  saveData();
+
+  message.reply(
+    `The goblin accepts your chosen identities:\n\n` +
+    `${selectedRoleNames.join('\n')}\n\n` +
+    `Wear them with honor... or at least mild effort.`
+  );
+}
+
+async function updateSacredShoeRole(guild, winnerId) {
+  const role = findRole(guild, SACRED_SHOE_ROLE);
+  if (!role) return;
+
+  for (const member of role.members.values()) {
+    await member.roles.remove(role).catch(() => {});
+  }
+
+  const winner = await guild.members.fetch(winnerId).catch(() => null);
+  if (winner) {
+    await winner.roles.add(role).catch(() => {});
+  }
+}
+
+async function moveOldVictorToFormerChampion(guild) {
+  const victorRole = findRole(guild, TRIAL_VICTOR_ROLE);
+  const formerRole = findRole(guild, FORMER_CHAMPION_ROLE);
+
+  if (!victorRole || !formerRole) return;
+
+  for (const member of victorRole.members.values()) {
+    await member.roles.remove(victorRole).catch(() => {});
+    await member.roles.add(formerRole).catch(() => {});
+  }
+}
+
+async function assignTrialVictor(guild, winnerId) {
+  const victorRole = findRole(guild, TRIAL_VICTOR_ROLE);
+  if (!victorRole) return;
+
+  for (const member of victorRole.members.values()) {
+    await member.roles.remove(victorRole).catch(() => {});
+  }
+
+  const winner = await guild.members.fetch(winnerId).catch(() => null);
+  if (winner) {
+    await winner.roles.add(victorRole).catch(() => {});
+  }
+}
+
+function makePrizePairings(overall) {
+  const topHalfCount = Math.floor(overall.length / 2);
+  const pairings = [];
+
+  for (let i = 0; i < topHalfCount; i++) {
+    const winner = overall[i];
+    const sponsor = overall[overall.length - 1 - i];
+
+    if (winner && sponsor && winner.userId !== sponsor.userId) {
+      pairings.push(`#${i + 1} ${winner.username} receives a prize from #${overall.length - i} ${sponsor.username}`);
+    }
+  }
+
+  return pairings;
+}
+
+function formatOverallStandings() {
+  const overall = getOverallRankings();
+
+  if (overall.length === 0) return `No challenge steps have been recorded yet.`;
+
+  return overall
+    .map((user, index) => `#${index + 1} ${user.username}: **${user.total}** steps`)
+    .join('\n');
+}
+
+function makeShoeCeremony(winner) {
+  if (!challenge.lastShoeHolderId) {
+    return (
+      `👹 **THE SACRED SHOE HAS BEEN BESTOWED**\n\n` +
+      `The goblin emerges from the shadows clutching the Sacred Shoe.\n\n` +
+      `**New Holder:** ${winner.username}\n\n` +
+      `${winner.username} has claimed the shoe with **${winner.steps}** steps.\n\n` +
+      `"Walk boldly, new holder. The goblin is watching."`
+    );
+  }
+
+  if (challenge.lastShoeHolderId === winner.userId) {
+    return (
+      `👹 **THE SACRED SHOE REMAINS CLAIMED**\n\n` +
+      `${winner.username} still holds the Sacred Shoe with **${winner.steps}** steps.\n\n` +
+      `The goblin narrows his eyes.\n\n` +
+      `"Impressive. Annoying, but impressive."`
+    );
+  }
+
+  return (
+    `👹 **THE SACRED SHOE HAS BEEN STOLEN**\n\n` +
+    `The goblin storms into the chamber clutching the sacred scroll.\n\n` +
+    `**Former Holder:** ${challenge.lastShoeHolderName}\n` +
+    `**New Holder:** ${winner.username}\n\n` +
+    `The goblin pries the Sacred Shoe from ${challenge.lastShoeHolderName}'s hands and dramatically bestows it upon ${winner.username}.\n\n` +
+    `${winner.username} has claimed the shoe with **${winner.steps}** steps.\n\n` +
+    `"Walk boldly, new holder. The goblin is watching."`
+  );
 }
 
 async function postDailyAnnouncement() {
@@ -164,6 +392,7 @@ async function postDailyAnnouncement() {
   const channel = client.channels.cache.get(GOBLIN_CHANNEL_ID);
   if (!channel) return;
 
+  const guild = channel.guild;
   const mood = getTodayMood();
   const yesterday = getYesterdayKey();
   const rankings = getDailyRankings(yesterday);
@@ -175,26 +404,35 @@ async function postDailyAnnouncement() {
       `${mood.line}\n\n` +
       `The goblin checked yesterday's scroll for **${formatDate(yesterday)}**...\n\n` +
       `No steps were submitted.\n\n` +
-      `The goblin is disappointed. Deeply. Dramatically.`
+      `The goblin is disappointed. Deeply. Dramatically.\n\n` +
+      `**Current Challenge Standings:**\n${formatOverallStandings()}`
     );
   } else {
     const winner = rankings[0];
+
+    await updateSacredShoeRole(guild, winner.userId);
+
+    const ceremony = makeShoeCeremony(winner);
 
     let message =
       `@everyone\n\n` +
       `👹 **Morning Goblin Judgment**\n\n` +
       `${mood.line}\n\n` +
-      `The goblin has reviewed the steps from **${formatDate(yesterday)}**.\n\n` +
-      `Today's **👹 Holder of the Sacred Shoe** is **${winner.username}** with **${winner.steps}** steps.\n\n` +
+      `${ceremony}\n\n` +
       `**Yesterday's Standings:**\n`;
 
     rankings.forEach((user, index) => {
       message += `#${index + 1} ${user.username}: **${user.steps}** steps\n`;
     });
 
-    message += `\nThe goblin has spoken. Continue walking, mortals.`;
+    message += `\n**Current Challenge Standings:**\n${formatOverallStandings()}\n\n`;
+    message += `The goblin has spoken. Continue walking, mortals.`;
 
     await channel.send(message);
+
+    challenge.lastShoeHolderId = winner.userId;
+    challenge.lastShoeHolderName = winner.username;
+    saveData();
   }
 
   if (yesterday >= challenge.endDate && !challenge.finalAnnounced) {
@@ -203,18 +441,25 @@ async function postDailyAnnouncement() {
     if (overall.length > 0) {
       const champion = overall[0];
 
+      await assignTrialVictor(guild, champion.userId);
+
+      const pairings = makePrizePairings(overall);
+
       let finalMessage =
         `@everyone\n\n` +
         `👑 **Final Goblin Judgment**\n\n` +
         `The trial has ended. The steps have been counted. The excuses have been ignored.\n\n` +
         `The goblin crowns **${champion.username}** as the **👑 Trial Victor** with **${champion.total}** total steps.\n\n` +
-        `**Final Standings:**\n`;
+        `**Final Standings:**\n${formatOverallStandings()}\n\n`;
 
-      overall.forEach((user, index) => {
-        finalMessage += `#${index + 1} ${user.username}: **${user.total}** steps\n`;
-      });
+      if (pairings.length > 0) {
+        finalMessage +=
+          `🎁 **Prize Pairings**\n\n` +
+          `${pairings.join('\n')}\n\n` +
+          `Reminder: the prize of the winner's choice should not exceed **$15**.\n\n`;
+      }
 
-      finalMessage += `\nThe goblin bows slightly... but only slightly.`;
+      finalMessage += `The goblin bows slightly... but only slightly.`;
 
       await channel.send(finalMessage);
     }
@@ -264,12 +509,7 @@ function handleGoblinConversation(message, lower) {
     return true;
   }
 
-  if (
-    lower.includes('funny') ||
-    lower.includes('joke') ||
-    lower.includes('laugh') ||
-    lower.includes('want to hear something funny')
-  ) {
+  if (lower.includes('funny') || lower.includes('joke') || lower.includes('laugh') || lower.includes('want to hear something funny')) {
     const jokes = [
       "A mortal once said, 'I'll walk later.' The goblin still laughs about that.",
       "Why did the mortal stop walking? Weakness.",
@@ -286,14 +526,7 @@ function handleGoblinConversation(message, lower) {
     return true;
   }
 
-  if (
-    lower.includes('excuse') ||
-    lower.includes('cant walk') ||
-    lower.includes("can't walk") ||
-    lower.includes("don't want") ||
-    lower.includes('dont want') ||
-    lower.includes('skip')
-  ) {
+  if (lower.includes('excuse') || lower.includes('cant walk') || lower.includes("can't walk") || lower.includes("don't want") || lower.includes('dont want') || lower.includes('skip')) {
     message.reply("The goblin accepts your excuse... and throws it directly into the fire.");
     return true;
   }
@@ -359,6 +592,7 @@ function handleGoblinConversation(message, lower) {
       "`!leaderboard` — view rankings\n" +
       "`!undo` — erase your last step entry\n" +
       "`!challenge` — view current trial\n" +
+      "`!roles 1 3 5` — choose walking identities\n" +
       "`!mood` — learn today's goblin mood"
     );
     return true;
@@ -382,12 +616,16 @@ client.once('ready', () => {
 
   cron.schedule('0 8 * * *', () => {
     postDailyAnnouncement();
-  }, {
-    timezone: TIMEZONE
+  }, { timezone: TIMEZONE });
+});
+
+client.on('guildMemberAdd', async (member) => {
+  await createParticipantChannel(member).catch(error => {
+    console.error('Failed to create participant channel:', error);
   });
 });
 
-client.on('messageCreate', (message) => {
+client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
   const args = message.content.trim().split(' ');
@@ -399,13 +637,20 @@ client.on('messageCreate', (message) => {
     if (handleGoblinConversation(message, lower)) return;
   }
 
+  if (command === '!roles') {
+    await assignSelectableRoles(message, args.slice(1));
+    return;
+  }
+
   if (command === '!goblin' || command === '!whoareyou') {
     message.reply("I am the Accountability Goblin, keeper of steps, judge of mortals, and loyal commander of the sacred shoe.");
+    return;
   }
 
   if (command === '!mood') {
     const mood = getTodayMood();
     message.reply(`Today's goblin mood is **${mood.name}**.\n\n${mood.line}`);
+    return;
   }
 
   if (command === '!startchallenge') {
@@ -419,29 +664,19 @@ client.on('messageCreate', (message) => {
       return;
     }
 
-    const start = new Date(args[1]);
-    const end = new Date(args[2]);
-
-    if (isNaN(start) || isNaN(end)) {
-      message.reply("The goblin squints... These dates are nonsense. Use `YYYY-MM-DD`.");
-      return;
-    }
-
     if (args[2] < args[1]) {
       message.reply("The goblin bonks the calendar... The end date cannot come before the start date, mortal.");
       return;
     }
 
-    pendingChallenge = {
-      startDate: args[1],
-      endDate: args[2]
-    };
+    pendingChallenge = { startDate: args[1], endDate: args[2] };
 
     message.reply(
       `The goblin squints at the sacred calendar...\n\n` +
       `You are about to begin a trial from **${formatDate(args[1])}** to **${formatDate(args[2])}**.\n\n` +
       `Type \`!confirmchallenge\` to begin, or \`!cancelchallenge\` to cancel.`
     );
+    return;
   }
 
   if (command === '!confirmchallenge') {
@@ -455,10 +690,14 @@ client.on('messageCreate', (message) => {
       return;
     }
 
+    await moveOldVictorToFormerChampion(message.guild);
+
     challenge.active = true;
     challenge.startDate = pendingChallenge.startDate;
     challenge.endDate = pendingChallenge.endDate;
     challenge.finalAnnounced = false;
+    challenge.lastShoeHolderId = null;
+    challenge.lastShoeHolderName = null;
     stepData = {};
     saveData();
 
@@ -469,16 +708,18 @@ client.on('messageCreate', (message) => {
         `@everyone\n\n` +
         `👹 **THE GOBLIN'S STEP TRIAL HAS BEEN DECLARED** 👹\n\n` +
         `A new trial shall run from **${formatDate(challenge.startDate)}** to **${formatDate(challenge.endDate)}**.\n\n` +
-        `Each morning at **8:00 AM**, the goblin will announce the previous day's standings.\n\n` +
+        `Each morning at **8:00 AM**, the goblin will announce the previous day's standings and the current challenge ranks.\n\n` +
         `Each day, the top walker shall be crowned:\n` +
         `**👹 Holder of the Sacred Shoe**\n\n` +
         `At the end, one will rise above all:\n` +
         `**👑 Trial Victor**\n\n` +
+        `Prize rule: top half receives prizes from the bottom half. Rank #1 receives from last place, Rank #2 from second-to-last, and so on. Prize choice should not exceed **$15**.\n\n` +
         `Walk boldly, mortals. The goblin is watching.`
       );
     }
 
     pendingChallenge = null;
+    return;
   }
 
   if (command === '!cancelchallenge') {
@@ -489,6 +730,7 @@ client.on('messageCreate', (message) => {
 
     pendingChallenge = null;
     message.reply("The goblin burns the mistaken prophecy.");
+    return;
   }
 
   if (command === '!endchallenge') {
@@ -499,8 +741,8 @@ client.on('messageCreate', (message) => {
 
     challenge.active = false;
     saveData();
-
     message.reply("The goblin declares... The trial has ended.");
+    return;
   }
 
   if (command === '!steps') {
@@ -516,7 +758,7 @@ client.on('messageCreate', (message) => {
       return;
     }
 
-    const steps = parseInt(args[1]);
+    const steps = parseInt(args[1], 10);
 
     if (!steps || steps < 1) {
       message.reply("The goblin squints... Try again.");
@@ -525,7 +767,6 @@ client.on('messageCreate', (message) => {
 
     const userId = message.author.id;
     const username = message.author.username;
-    const date = getDateKey();
     const mood = getTodayMood();
 
     if (!stepData[userId]) {
@@ -534,7 +775,7 @@ client.on('messageCreate', (message) => {
 
     stepData[userId].username = username;
     stepData[userId].total += steps;
-    stepData[userId].entries.push({ steps, date });
+    stepData[userId].entries.push({ steps, date: today });
 
     saveData();
 
@@ -543,6 +784,7 @@ client.on('messageCreate', (message) => {
     } else {
       message.reply(`${mood.stepPraise} Recorded: **${steps}** steps.`);
     }
+    return;
   }
 
   if (command === '!undo') {
@@ -555,27 +797,15 @@ client.on('messageCreate', (message) => {
 
     const last = stepData[userId].entries.pop();
     stepData[userId].total -= last.steps;
-
     saveData();
 
     message.reply(`The goblin erases **${last.steps}** steps. Suspicious, but permitted.`);
+    return;
   }
 
   if (command === '!leaderboard') {
-    const rankings = getOverallRankings();
-
-    if (rankings.length === 0) {
-      message.reply("No steps yet.");
-      return;
-    }
-
-    let msg = "👹 **Leaderboard** 👹\n\n";
-
-    rankings.forEach((u, i) => {
-      msg += `#${i + 1} ${u.username}: **${u.total}** steps\n`;
-    });
-
-    message.reply(msg);
+    message.reply(`👹 **Leaderboard** 👹\n\n${formatOverallStandings()}`);
+    return;
   }
 
   if (command === '!challenge') {
@@ -584,9 +814,8 @@ client.on('messageCreate', (message) => {
       return;
     }
 
-    message.reply(
-      `The current trial runs from **${formatDate(challenge.startDate)}** to **${formatDate(challenge.endDate)}**.`
-    );
+    message.reply(`The current trial runs from **${formatDate(challenge.startDate)}** to **${formatDate(challenge.endDate)}**.`);
+    return;
   }
 
   if (command === '!testdaily') {
@@ -595,8 +824,9 @@ client.on('messageCreate', (message) => {
       return;
     }
 
-    postDailyAnnouncement();
+    await postDailyAnnouncement();
     message.reply("The goblin performs a test morning judgment.");
+    return;
   }
 });
 
