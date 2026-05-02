@@ -228,67 +228,152 @@ async function postDailyAnnouncement() {
 function handleGoblinConversation(message, lower) {
   if (message.content.startsWith('!')) return false;
 
+  lower = lower.replace(/<@!?\d+>/g, '').trim();
+
+  if (lower === '') {
+    message.reply("You have summoned the goblin. Speak your request, mortal.");
+    return true;
+  }
+
+  const mood = getTodayMood();
+
+  if (['hi', 'hello', 'hey', 'yo', 'sup', 'greetings'].some(word => lower.includes(word))) {
+    const replies = [
+      "The goblin acknowledges your presence. Have you walked?",
+      "Greetings, mortal. Your step count will determine your worth.",
+      "Hello. The goblin is already judging you.",
+      "You have greeted the goblin. This was a bold decision.",
+      "The goblin peeks from behind the sacred scroll. Speak."
+    ];
+    message.reply(replies[Math.floor(Math.random() * replies.length)]);
+    return true;
+  }
+
   if (lower.includes('who are you') || lower.includes('what are you')) {
     message.reply("I am the Accountability Goblin, keeper of steps, judge of mortals, and owner of the sacred shoe. I do not explain myself twice.");
     return true;
   }
 
-  if (lower.includes('hi goblin') || lower.includes('hello goblin') || lower.includes('hey goblin')) {
-    message.reply("The goblin peers from behind the scroll... greetings, mortal. Have you walked, or merely appeared?");
+  if (lower.includes('good morning')) {
+    message.reply(`The goblin awakens. ${mood.line}`);
     return true;
   }
 
-  if (lower.includes('good morning goblin')) {
-    message.reply(`The goblin awakens. ${getTodayMood().line}`);
+  if (lower.includes('good night')) {
+    message.reply("The goblin watches even while you sleep. Rest… but not too comfortably.");
     return true;
   }
 
-  if (lower.includes('i am tired') || lower.includes("i'm tired") || lower.includes('im tired')) {
-    message.reply("Tired? The goblin respects this. The goblin also ignores it. Walk anyway.");
+  if (
+    lower.includes('funny') ||
+    lower.includes('joke') ||
+    lower.includes('laugh') ||
+    lower.includes('want to hear something funny')
+  ) {
+    const jokes = [
+      "A mortal once said, 'I'll walk later.' The goblin still laughs about that.",
+      "Why did the mortal stop walking? Weakness.",
+      "The funniest thing the goblin has seen? A 300-step day.",
+      "The goblin does not joke. Life is the joke. Also your step count.",
+      "The sacred shoe once ran away from a lazy mortal. Understandable."
+    ];
+    message.reply(jokes[Math.floor(Math.random() * jokes.length)]);
     return true;
   }
 
-  if (lower.includes('i walked') || lower.includes('i got steps')) {
+  if (lower.includes('tired') || lower.includes('lazy') || lower.includes('sleepy')) {
+    message.reply("Tired? The goblin respects your honesty. The goblin ignores it. Walk anyway.");
+    return true;
+  }
+
+  if (
+    lower.includes('excuse') ||
+    lower.includes('cant walk') ||
+    lower.includes("can't walk") ||
+    lower.includes("don't want") ||
+    lower.includes('dont want') ||
+    lower.includes('skip')
+  ) {
+    message.reply("The goblin accepts your excuse... and throws it directly into the fire.");
+    return true;
+  }
+
+  if (lower.includes('i walked') || lower.includes('i got steps') || lower.includes('got my steps')) {
     message.reply("The goblin hears claims of walking. Submit the sacred number with `!steps` or be suspected of exaggeration.");
     return true;
   }
 
-  if (lower.includes('excuse')) {
-    message.reply("The goblin places your excuse into the tiny excuse furnace. It is gone now.");
-    return true;
-  }
-
-  if (lower.includes('sacred shoe')) {
-    message.reply("The sacred shoe is not merely a shoe. It is power. It is glory. It probably smells terrible.");
-    return true;
-  }
-
-  if (lower.includes('trial victor')) {
-    message.reply("The Trial Victor shall be crowned only after the goblin counts every step and rejects every dramatic excuse.");
-    return true;
-  }
-
-  if (lower.includes('goblin')) {
+  if (lower.includes('walk') || lower.includes('steps')) {
     const replies = [
-      "The goblin heard his name and has chosen to appear dramatically.",
-      "You summoned the goblin. This may have consequences.",
-      "The goblin is listening. He is always listening.",
-      "Speak carefully, mortal. The goblin has a spreadsheet and no mercy.",
-      "The goblin emerges from the step cave. What is it?"
+      "Did someone say steps? The goblin awakens.",
+      "Walking is encouraged. Stopping is suspicious.",
+      "The goblin nods. Movement is good.",
+      "The goblin is listening for numbers...",
+      "The sacred scroll accepts only step offerings."
     ];
-
     message.reply(replies[Math.floor(Math.random() * replies.length)]);
     return true;
   }
 
-  if (Math.random() < 0.03) {
-    const mood = getTodayMood();
-    const random = mood.randoms[Math.floor(Math.random() * mood.randoms.length)];
-    message.channel.send(random);
+  if (lower.includes('motivate') || lower.includes('motivation') || lower.includes('hype') || lower.includes('encourage')) {
+    const hype = [
+      "Walk like the goblin is chasing you. Because he might be.",
+      "Every step brings you closer to glory. Or at least less shame.",
+      "Move. The goblin demands it.",
+      "Your future self will thank you. The goblin will judge you regardless.",
+      "You are capable of more steps. Unfortunately, now the goblin expects them."
+    ];
+    message.reply(hype[Math.floor(Math.random() * hype.length)]);
     return true;
   }
 
-  return false;
+  if (lower.includes('sacred shoe') || lower.includes('shoe')) {
+    message.reply("The sacred shoe is not merely a shoe. It is power. It is glory. It probably smells terrible.");
+    return true;
+  }
+
+  if (lower.includes('trial victor') || lower.includes('victor') || lower.includes('winner')) {
+    message.reply("Only one mortal will rise as 👑 Trial Victor. The rest will be remembered... poorly.");
+    return true;
+  }
+
+  if (lower.includes('thank you') || lower.includes('thanks')) {
+    message.reply("The goblin accepts your gratitude. Payment in steps is preferred.");
+    return true;
+  }
+
+  if (lower.includes('sorry')) {
+    message.reply("The goblin does not require apologies. The goblin requires steps.");
+    return true;
+  }
+
+  if (lower.includes('water') || lower.includes('hydrate')) {
+    message.reply("The goblin commands hydration. Dry mortals walk poorly.");
+    return true;
+  }
+
+  if (lower.includes('help')) {
+    message.reply(
+      "The goblin permits these commands:\n\n" +
+      "`!steps 5000` — submit steps\n" +
+      "`!leaderboard` — view rankings\n" +
+      "`!undo` — erase your last step entry\n" +
+      "`!challenge` — view current trial\n" +
+      "`!mood` — learn today's goblin mood"
+    );
+    return true;
+  }
+
+  const fallbackReplies = [
+    "The goblin heard you, but understood only vibes.",
+    "The goblin tilts his head. Interesting. Suspicious, but interesting.",
+    "The goblin records this conversation under: questionable mortal behavior.",
+    "The goblin is unsure what you mean, but he is certain more walking would help.",
+    "The goblin blinks slowly. Try again, mortal."
+  ];
+
+  message.reply(fallbackReplies[Math.floor(Math.random() * fallbackReplies.length)]);
+  return true;
 }
 
 client.once('ready', () => {
@@ -308,8 +393,11 @@ client.on('messageCreate', (message) => {
   const args = message.content.trim().split(' ');
   const command = args[0].toLowerCase();
   const lower = message.content.toLowerCase();
+  const isMentioned = message.mentions.has(client.user);
 
-  if (handleGoblinConversation(message, lower)) return;
+  if (isMentioned) {
+    if (handleGoblinConversation(message, lower)) return;
+  }
 
   if (command === '!goblin' || command === '!whoareyou') {
     message.reply("I am the Accountability Goblin, keeper of steps, judge of mortals, and loyal commander of the sacred shoe.");
